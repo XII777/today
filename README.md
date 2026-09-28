@@ -78,8 +78,22 @@ echo "sdk.dir=/path/to/Android/Sdk" > local.properties
 ./gradlew assembleDebug          # debug APK
 ./gradlew testDebugUnitTest      # unit tests
 ./gradlew lintDebug              # static analysis
-./gradlew assembleRelease        # release APK (unsigned unless configured)
+./gradlew assembleRelease        # signed release APKs, one per architecture
 ```
+
+`assembleRelease` writes five APKs to `app/build/outputs/apk/release/`:
+
+| File | Architecture |
+|---|---|
+| `app-arm64-v8a-release.apk` | Modern phones (most devices since ~2017) |
+| `app-armeabi-v7a-release.apk` | Older 32-bit phones |
+| `app-x86_64-release.apk` | 64-bit emulators |
+| `app-x86-release.apk` | 32-bit emulators |
+| `app-universal-release.apk` | Any device |
+
+The app currently ships no native libraries, so these hold the same bytecode.
+The split is kept because it costs nothing and any future native dependency
+would otherwise ship every architecture to every device.
 
 ## Signing a release
 
@@ -104,13 +118,30 @@ TODAY_KEY_PASSWORD
 
 With neither, `assembleRelease` still succeeds and produces an unsigned APK.
 
+To create a key:
+
+```bash
+keytool -genkeypair -v -keystore release.jks -storetype PKCS12 \
+  -alias today-release -keyalg RSA -keysize 4096 -sigalg SHA256withRSA \
+  -validity 36500
+```
+
+**Back up `release.jks` and its passwords.** An app can only be updated in
+place by a build signed with the same key, so losing both ends the ability to
+ship updates.
+
 ## Continuous integration
 
-`.github/workflows/build.yml` runs unit tests, lint, and a debug build on every push
-and pull request. Tagged pushes (`v*`) additionally build a release, sign it if a
-key is configured, and attach the APK to a GitHub release.
+`.github/workflows/build.yml` has three jobs:
 
-To enable signing in CI, add these repository secrets:
+- **Verify** — unit tests and lint, on every push and pull request. No secrets
+  are exposed to untrusted forks.
+- **Build release APKs** — assembles the five signed APKs, the R8 `mapping.txt`,
+  and a `SHA256SUMS` file, and uploads them as a workflow artifact.
+- **Release** — tagged pushes (`v*`) attach those same artifacts to the
+  [GitHub release page](https://github.com/XII777/today/releases).
+
+Signing in CI needs these repository secrets:
 
 | Secret | Value |
 |---|---|
@@ -118,6 +149,18 @@ To enable signing in CI, add these repository secrets:
 | `KEYSTORE_PASSWORD` | the store password |
 | `KEY_ALIAS` | the key alias |
 | `KEY_PASSWORD` | the key password |
+
+Without them the pipeline still builds, but the APKs are unsigned and the
+workflow says so explicitly. An unsigned APK installs but can never be upgraded
+in place.
+
+To publish:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
 
 ## Architecture
 

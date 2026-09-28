@@ -94,6 +94,27 @@ android {
         }
     }
 
+    // One APK per CPU architecture, plus a universal APK for people who would
+    // rather not pick. `reset()` clears the four architectures AGP enables by
+    // default so the set below is the whole, explicit list.
+    //
+    // Note: this app currently ships no native libraries, so the per-ABI APKs
+    // hold the same bytecode as the universal one. The split is kept because it
+    // costs nothing and any future native dependency would otherwise ship every
+    // architecture to every device.
+    //
+    // AGP 8.x no longer exposes `versionCodeOverrides`; per-ABI version codes
+    // are only mandatory for Play Store uploads, and these APKs are downloaded
+    // directly, so every split keeps the base `versionCode`.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+            isUniversalApk = true
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

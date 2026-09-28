@@ -9,11 +9,18 @@ on:
   workflow_dispatch:
 
 # Only the newest run per branch is worth keeping; older ones waste minutes.
+# The group is keyed on the ref, so a tag build never cancels a main build.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  KEYSTORE_PATH: ${{ runner.temp }}/keys/release.jks
+  APK_GLOB: app/build/outputs/apk/release/*.apk
+
 jobs:
+  # Tests and lint only. No secrets are exposed to untrusted pull requests, and
+  # this job is the gate every other job waits on.
   verify:
     name: Verify
     runs-on: ubuntu-latest
@@ -39,37 +46,19 @@ jobs:
           echo "sdk_dir=$SDK_ROOT" >> "$GITHUB_OUTPUT"
           echo "sdk.dir=$SDK_ROOT" > local.properties
 
-      - name: Cache the Android SDK
-        uses: actions/cache@v4
-        with:
-          path: ${{ steps.sdk.outputs.sdk_dir }}
-          key: sdk-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
-          restore-keys: sdk-${{ runner.os }}-
-
       - name: Unit tests
         run: ./gradlew --no-configuration-cache testDebugUnitTest
 
       - name: Lint
         run: ./gradlew --no-configuration-cache lintDebug
 
-      - name: Assemble debug
-        run: ./gradlew --no-configuration-cache assembleDebug
-
-      - name: Upload the debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-debug
-          path: app/build/outputs/apk/debug/*.apk
-          retention-days: 14
-
-  release:
-    name: Release
-    # A release is only meaningful for a tag, and only from the default branch.
-    if: startsWith(github.ref, 'refs/tags/v')
+  # One signed APK per architecture plus a universal APK. Skipped for pull
+  # requests: a fork must never be able to read the signing key.
+  build:
+    name: Build release APKs
     needs: verify
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -89,44 +78,86 @@ jobs:
           echo "sdk_dir=$SDK_ROOT" >> "$GITHUB_OUTPUT"
           echo "sdk.dir=$SDK_ROOT" > local.properties
 
-      # The keystore is supplied base64-encoded so it never exists in the
-      # repository. `TODAY_STORE_FILE` points at the path written here.
+      # The keystore is supplied base64-encoded so the private key never exists
+      # in the repository. It is restored into the runner's temporary directory,
+      # which is discarded when the job ends.
       - name: Restore the signing keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
           set -euo pipefail
           if [ -z "${KEYSTORE_BASE64}" ]; then
-            echo "::warning::No signing key configured; the release will be unsigned."
+            echo "::warning::KEYSTORE_BASE64 is not set; APKs will be UNSIGNED."
             exit 0
           fi
-          mkdir -p "$RUNNER_TEMP/keys"
-          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/keys/release.jks"
-          echo "Signing with the repository key."
+          mkdir -p "$(dirname "$KEYSTORE_PATH")"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+          chmod 600 "$KEYSTORE_PATH"
+          echo "Signing key restored."
 
       - name: Assemble release
         env:
-          TODAY_STORE_FILE: ${{ runner.temp }}/keys/release.jks
+          TODAY_STORE_FILE: ${{ env.KEYSTORE_PATH }}
           TODAY_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           TODAY_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           TODAY_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew --no-configuration-cache assembleRelease
 
-      # Publishing unsigned is a real outcome, not a failure: a fork or a
-      # misconfigured secret should not fail the whole pipeline.
-      - name: Collect release artifacts
-        id: collect
+      # An unsigned APK installs but can never be upgraded in place, so the
+      # failure mode is reported loudly rather than shipped quietly.
+      - name: Report signing state
         run: |
+          set -euo pipefail
+          BT="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME"/build-tools | sort -V | tail -1)"
+          for apk in $APK_GLOB; do
+            DN="$("$BT/apksigner" verify --print-certs "$apk" 2>/dev/null \
+                 | sed -n 's/^Signer #1 certificate DN: //p' | head -1)"
+            if [ -n "$DN" ]; then
+              echo "signed    $(basename "$apk")  <- $DN"
+            else
+              echo "::warning::$(basename "$apk") is UNSIGNED"
+            fi
+          done
+
+      - name: Collect the release artifacts
+        run: |
+          set -euo pipefail
           mkdir -p dist
-          cp app/build/outputs/apk/release/*.apk dist/ 2>/dev/null || true
-          cp app/build/outputs/mapping/release/mapping.txt dist/ 2>/dev/null || true
-          ls -1 dist || true
+          cp $APK_GLOB dist/
+          cp app/build/outputs/mapping/release/mapping.txt dist/mapping.txt
+          # Checksums let someone confirm a download was not truncated or
+          # substituted, which matters for a binary nobody else can sign.
+          (cd dist && sha256sum *.apk > SHA256SUMS)
+          cat dist/SHA256SUMS
+
+      - name: Upload the release APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release
+          path: dist/
+          retention-days: 30
+
+  # Populates https://github.com/XII777/today/releases with the same artifacts
+  # the build job produced, so the release page and the CI run never disagree.
+  release:
+    name: Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download the release APKs
+        uses: actions/download-artifact@v4
+        with:
+          name: app-release
+          path: dist
 
       - name: Publish the release
-        if: hashFiles('dist/*.apk') != ''
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
+          fail_on_unmatched_files: true
           generate_release_notes: true
           body: |
             ## Today
@@ -136,3 +167,27 @@ jobs:
             - Minimum Android 8.0 (API 26)
             - No account, no network permission, no analytics
             - Entries are sealed the moment the day rolls over
+
+            ### Downloads
+
+            Pick the APK for your device, or take the universal build.
+
+            | File | Architecture |
+            | --- | --- |
+            | `app-arm64-v8a-release.apk` | Modern phones (most devices since ~2017) |
+            | `app-armeabi-v7a-release.apk` | Older 32-bit phones |
+            | `app-x86_64-release.apk` | 64-bit emulators |
+            | `app-x86-release.apk` | 32-bit emulators |
+            | `app-universal-release.apk` | Any device |
+
+            `SHA256SUMS` lists the checksum of every APK. Verify it after
+            downloading if the file matters to you.
+
+            ### Verify a download
+
+            ```
+            sha256sum --check SHA256SUMS
+            ```
+
+            `mapping.txt` is the R8 symbol mapping, needed to de-obfuscate a
+            crash report from a release build.
