@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Compose owns all in-app theming. This style exists only so the window has a
+        correct background and the splash/starting state does not flash a light
+        surface before Compose draws.
+    -->
+    <style name="Theme.Today" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+    </style>
+
+    <style name="Theme.Today.Starting" parent="Theme.Today" />
+</resources>

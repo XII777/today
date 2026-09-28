@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    `windowLayoutInDisplayCutoutMode` only exists from API 27. Declaring it in
+    `values/` would put an unknown attribute into the style on API 26, so it is
+    added here instead and the app simply letterboxes on the devices that cannot
+    draw into a cutout.
+-->
+<resources>
+    <style name="Theme.Today" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+    </style>
+</resources>

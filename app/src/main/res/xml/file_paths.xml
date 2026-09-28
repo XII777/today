@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Only used to hand a user-chosen export document to another app for sharing. -->
+    <cache-path
+        name="shared_exports"
+        path="shared/" />
+    <files-path
+        name="internal_exports"
+        path="exports/" />
+</paths>

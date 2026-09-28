@@ -1,0 +1,18 @@
+# Normalize text files to LF in the repository.
+* text=auto eol=lf
+
+# Shell scripts must stay LF or they fail to execute in bash environments.
+*.sh text eol=lf
+gradlew text eol=lf
+
+# Windows scripts must stay CRLF.
+*.bat text eol=crlf
+gradlew.bat text eol=crlf
+
+# Binary assets.
+*.jar binary
+*.png binary
+*.jpg binary
+*.webp binary
+*.keystore binary
+*.jks binary

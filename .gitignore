@@ -1,0 +1,40 @@
+# The requirements document is the user's private working material, not source.
+# It stays on disk; it is never committed.
+AI_Offline_Immutable_Journaling_App_Master_Prompt.docx
+*.docx
+
+# Local spec extraction (a readable copy of the above) and any working notes.
+_spec/
+_notes/
+*.local
+*.local.md
+
+# Signing material — never commit these
+keystore.properties
+*.jks
+*.keystore
+*.p12
+*.pem
+
+# Android / Gradle build output
+local.properties
+.gradle/
+build/
+**/build/
+.externalNativeBuild/
+.cxx/
+captures/
+.kotlin/
+
+# IDE
+.idea/
+*.iml
+*.hprof
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Keystore base64, if anyone drops one in the root by mistake
+*.base64
